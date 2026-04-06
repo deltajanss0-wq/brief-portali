@@ -19,6 +19,11 @@ st.markdown("""
         border-radius: 8px;
         font-family: 'Poppins', sans-serif !important;
     }
+
+    /* Sayfalama butonu için özel stil */
+    .st-emotion-cache-12fmjuu {
+        justify-content: center;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -26,16 +31,20 @@ st.markdown("""
 DOSYA_KLASORU = "yuklenen_briefler"
 CSV_DOSYASI = "kampanya_verileri.csv"
 MAKS_KAMPANYA = 25
-# YENİ LİSTE: Kritik eklendi
 ACILIYET_LISTESI = ["Normal", "Önemli", "Kritik", "Çok Acil!"]
 
 os.makedirs(DOSYA_KLASORU, exist_ok=True)
 
+# Veri Yükleme
 if not os.path.exists(CSV_DOSYASI):
     df = pd.DataFrame(columns=["ID", "Kampanya Adı", "Başlangıç", "Bitiş", "Aciliyet", "Dosya"])
     df.to_csv(CSV_DOSYASI, index=False)
 
 df = pd.read_csv(CSV_DOSYASI)
+
+# Sayfa Durumu Kontrolü (Session State)
+if 'mevcut_sayfa' not in st.session_state:
+    st.session_state.mevcut_sayfa = 1
 
 # Başlık ve İmza
 st.markdown("<h1>📂 Kampanya & Brief Yönetim Portalı <span style='font-size:18px; color:#6c757d; font-weight:400; vertical-align:middle;'>created by yaso®</span></h1>", unsafe_allow_html=True)
@@ -53,7 +62,6 @@ if is_admin:
         with st.form("yeni_ekle_form", clear_on_submit=True):
             col_ad, col_acil = st.columns(2)
             k_adi = col_ad.text_input("Kampanya Adı")
-            # Güncellenmiş liste burada
             aciliyet = col_acil.selectbox("Aciliyet", ACILIYET_LISTESI)
             
             c_bas, c_bit = st.columns(2)
@@ -88,7 +96,6 @@ if is_admin:
             with col_ed:
                 y_bas = st.date_input("Başlangıç", pd.to_datetime(row["Başlangıç"]), key=f"eb_{index}")
                 y_bit = st.date_input("Bitiş", pd.to_datetime(row["Bitiş"]), key=f"et_{index}")
-                # Mevcut değer listede yoksa Normal'i seç
                 mevcut_acil = row["Aciliyet"] if row["Aciliyet"] in ACILIYET_LISTESI else "Normal"
                 y_acil = st.selectbox("Aciliyet", ACILIYET_LISTESI, index=ACILIYET_LISTESI.index(mevcut_acil), key=f"ea_{index}")
                 if st.button("Güncelle", key=f"upd_{index}"):
@@ -99,9 +106,9 @@ if is_admin:
             with col_del:
                 st.write("---")
                 if st.button("🗑️ SİL", key=f"del_{index}"):
-                    dosya_degeri = str(row["Dosya"]).strip()
-                    if pd.notna(row["Dosya"]) and dosya_degeri not in ["", "nan"]:
-                        eski_yol = os.path.join(DOSYA_KLASORU, os.path.basename(dosya_degeri.replace("\\", "/")))
+                    d_ad = str(row["Dosya"]).strip()
+                    if pd.notna(row["Dosya"]) and d_ad not in ["", "nan"]:
+                        eski_yol = os.path.join(DOSYA_KLASORU, os.path.basename(d_ad.replace("\\", "/")))
                         try:
                             if os.path.exists(eski_yol): os.remove(eski_yol)
                         except: pass
@@ -116,21 +123,27 @@ st.header("📋 Aktif Kampanyalar")
 if df.empty:
     st.info("Gösterilecek kampanya bulunmuyor.")
 else:
+    # Sayfalama Hesaplamaları
     is_basina_kampanya = 5
-    toplam_sayfa = math.ceil(len(df) / is_basina_kampanya)
-    sayfa = 1
-    if toplam_sayfa > 1:
-        sayfa = st.sidebar.select_slider("Sayfa Seçin", options=list(range(1, toplam_sayfa + 1)), value=1)
+    toplam_kampanya = len(df)
+    toplam_sayfa = math.ceil(toplam_kampanya / is_basina_kampanya)
     
-    bas_index = (sayfa - 1) * is_basina_kampanya
-    gosterilecek_df = df.iloc[bas_index:bas_index + is_basina_kampanya]
+    # Mevcut sayfa kontrolü (silme işlemlerinden sonra taşmayı önlemek için)
+    if st.session_state.mevcut_sayfa > toplam_sayfa:
+        st.session_state.mevcut_sayfa = toplam_sayfa
+    if st.session_state.mevcut_sayfa < 1:
+        st.session_state.mevcut_sayfa = 1
 
+    bas_index = (st.session_state.mevcut_sayfa - 1) * is_basina_kampanya
+    bit_index = min(bas_index + is_basina_kampanya, toplam_kampanya)
+    gosterilecek_df = df.iloc[bas_index:bit_index]
+
+    # Kampanya Listesi
     for index, row in gosterilecek_df.iterrows():
         with st.container(border=True):
             c1, c2, c3, c4 = st.columns([3, 2, 2, 2])
             with c1:
                 st.subheader(f"🎯 {row['Kampanya Adı']}")
-                # Emoji Mantığı Güncellendi
                 if row["Aciliyet"] == "Çok Acil!": r = "🔴"
                 elif row["Aciliyet"] == "Kritik": r = "🟠"
                 elif row["Aciliyet"] == "Önemli": r = "🟡"
@@ -150,3 +163,23 @@ else:
                             st.download_button("📥 Brief İndir", f, file_name=f"{row['Kampanya Adı']}.pdf", key=f"dl_{index}", use_container_width=True)
                     else: st.caption("⚠️ Dosya eksik")
                 else: st.caption("⏳ Bekleniyor")
+
+    # --- ALT SAYFALAMA KONTROLÜ ---
+    st.write("---")
+    p1, p2, p3 = st.columns([1, 2, 1])
+    
+    with p1:
+        if st.session_state.mevcut_sayfa > 1:
+            if st.button("⬅️ Önceki Sayfa", use_container_width=True):
+                st.session_state.mevcut_sayfa -= 1
+                st.rerun()
+    
+    with p2:
+        st.markdown(f"<p style='text-align: center; font-weight: bold; font-size: 18px;'>Sayfa {st.session_state.mevcut_sayfa} / {toplam_sayfa}</p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='text-align: center; font-size: 12px; color: gray;'>Toplam {toplam_kampanya} kampanya</p>", unsafe_allow_html=True)
+
+    with p3:
+        if st.session_state.mevcut_sayfa < toplam_sayfa:
+            if st.button("Sonraki Sayfa ➡️", use_container_width=True):
+                st.session_state.mevcut_sayfa += 1
+                st.rerun()
