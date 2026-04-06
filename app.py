@@ -6,12 +6,11 @@ import math
 # Sayfa Ayarları
 st.set_page_config(page_title="Kampanya & Brief Yönetimi", layout="wide")
 
-# CSS: Poppins Font ve Modern Kart Tasarımı
+# CSS: Sadece fontları ayarlıyoruz, tasarımı Streamlit'in kendi kutularına bırakıyoruz
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
     
-    /* Sadece metin elemanlarını hedef alıyoruz, ikon sınıflarını serbest bırakıyoruz */
     html, body, p, h1, h2, h3, h4, h5, h6, label, li, span.st-emotion-cache-10trblm {
         font-family: 'Poppins', sans-serif !important;
     }
@@ -19,16 +18,6 @@ st.markdown("""
     .stButton>button {
         border-radius: 8px;
         font-family: 'Poppins', sans-serif !important;
-    }
-    
-    .ajans-kutu {
-        background-color: #f8f9fa;
-        padding: 20px;
-        border-radius: 10px;
-        border-left: 5px solid #4CAF50;
-        margin-bottom: 20px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        font-family: 'Poppins', sans-serif;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -58,7 +47,7 @@ is_admin = (sifre == "13579")
 if is_admin:
     st.sidebar.success("Erişim Yetkisi Verildi")
     
-    # 1. KAMPANYA EKLEME (LİMİTLİ)
+    # 1. KAMPANYA EKLEME
     st.header("⚙️ Yeni Kampanya Ekle")
     if len(df) < MAKS_KAMPANYA:
         with st.form("yeni_ekle_form", clear_on_submit=True):
@@ -75,14 +64,16 @@ if is_admin:
             if st.form_submit_button("Kampanyayı Kaydet"):
                 if k_adi:
                     yeni_id = int(df["ID"].max() + 1) if not df.empty else 1
-                    d_yolu = ""
+                    dosya_adi = ""
+                    
                     if yeni_pdf:
-                        d_adi = f"kampanya_{yeni_id}_brief.pdf"
-                        d_yolu = os.path.join(DOSYA_KLASORU, d_adi)
-                        with open(d_yolu, "wb") as f:
+                        dosya_adi = f"kampanya_{yeni_id}_brief.pdf"
+                        tam_yol = os.path.join(DOSYA_KLASORU, dosya_adi)
+                        with open(tam_yol, "wb") as f:
                             f.write(yeni_pdf.getbuffer())
                     
-                    yeni_satir = pd.DataFrame([{"ID": yeni_id, "Kampanya Adı": k_adi, "Başlangıç": baslangic, "Bitiş": bitis, "Aciliyet": aciliyet, "Dosya": d_yolu}])
+                    # Artık sadece dosyanın adını kaydediyoruz, tam yolu değil
+                    yeni_satir = pd.DataFrame([{"ID": yeni_id, "Kampanya Adı": k_adi, "Başlangıç": baslangic, "Bitiş": bitis, "Aciliyet": aciliyet, "Dosya": dosya_adi}])
                     df = pd.concat([df, yeni_satir], ignore_index=True)
                     df.to_csv(CSV_DOSYASI, index=False)
                     st.success("Yeni kampanya eklendi.")
@@ -110,10 +101,14 @@ if is_admin:
             with col_del:
                 st.write("---")
                 if st.button("🗑️ SİL", key=f"del_{index}", help="Bu kampanyayı kalıcı olarak siler"):
-                    if pd.notna(row["Dosya"]) and str(row["Dosya"]).strip() != "" and os.path.exists(str(row["Dosya"])):
+                    dosya_degeri = str(row["Dosya"]).strip()
+                    if pd.notna(row["Dosya"]) and dosya_degeri != "" and dosya_degeri != "nan":
+                        eski_dosya_adi = os.path.basename(dosya_degeri.replace("\\", "/"))
+                        silinecek_yol = os.path.join(DOSYA_KLASORU, eski_dosya_adi)
                         try:
-                            os.remove(str(row["Dosya"]))
-                        except Exception as e:
+                            if os.path.exists(silinecek_yol):
+                                os.remove(silinecek_yol)
+                        except Exception:
                             pass
                             
                     df = df.drop(index).reset_index(drop=True)
@@ -133,7 +128,6 @@ else:
     toplam_sayfa = math.ceil(len(df) / is_basina_kampanya)
     
     sayfa = 1
-    
     if toplam_sayfa > 1:
         sayfa = st.sidebar.select_slider("Sayfa Seçin", options=list(range(1, toplam_sayfa + 1)), value=1)
     
@@ -144,20 +138,44 @@ else:
     st.write(f"Toplam {len(df)} kampanya arasından {bas_index+1}-{min(bit_index, len(df))} arası gösteriliyor.")
 
     for index, row in gosterilecek_df.iterrows():
-        st.markdown(f'<div class="ajans-kutu">', unsafe_allow_html=True)
-        c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
-        
-        c1.markdown(f"### 🎯 {row['Kampanya Adı']}")
-        r = "🔴" if row["Aciliyet"] == "Çok Acil!" else "🟡" if row["Aciliyet"] == "Önemli" else "🟢"
-        c1.markdown(f"**Durum:** {r} {row['Aciliyet']}")
-        
-        c2.write(f"**Başlangıç:**\n{row['Başlangıç']}")
-        c3.write(f"**Bitiş:**\n{row['Bitiş']}")
-        
-        with c4:
-            if pd.notna(row["Dosya"]) and str(row["Dosya"]).strip() != "" and os.path.exists(str(row["Dosya"])):
-                with open(str(row["Dosya"]), "rb") as f:
-                    st.download_button("📥 Brief İndir", f, file_name=f"{row['Kampanya Adı']}.pdf", key=f"dl_{index}")
-            else:
-                st.caption("Brief Henüz Yok")
-        st.markdown('</div>', unsafe_allow_html=True)
+        # HTML DİV YERİNE STREAMLIT'İN KENDİ DÜZENLİ KUTULARINI KULLANIYORUZ
+        with st.container(border=True):
+            c1, c2, c3, c4 = st.columns([3, 2, 2, 2])
+            
+            with c1:
+                st.subheader(f"🎯 {row['Kampanya Adı']}")
+                r = "🔴" if row["Aciliyet"] == "Çok Acil!" else "🟡" if row["Aciliyet"] == "Önemli" else "🟢"
+                st.write(f"**Aciliyet:** {r} {row['Aciliyet']}")
+            
+            with c2:
+                st.write(f"**Başlangıç:**")
+                st.write(f"{row['Başlangıç']}")
+                
+            with c3:
+                st.write(f"**Bitiş:**")
+                st.write(f"{row['Bitiş']}")
+            
+            with c4:
+                st.write("**Brief Dosyası:**")
+                dosya_degeri = str(row["Dosya"]).strip()
+                
+                # Hem boş mu diye bakıyoruz hem de NaN metni mi diye kontrol ediyoruz
+                if pd.notna(row["Dosya"]) and dosya_degeri != "" and dosya_degeri != "nan":
+                    # Windows/Linux karmaşasını çözen kısım:
+                    gercek_dosya_adi = os.path.basename(dosya_degeri.replace("\\", "/"))
+                    okunacak_yol = os.path.join(DOSYA_KLASORU, gercek_dosya_adi)
+                    
+                    if os.path.exists(okunacak_yol):
+                        with open(okunacak_yol, "rb") as f:
+                            st.download_button(
+                                label="📥 Brief İndir", 
+                                data=f, 
+                                file_name=f"{row['Kampanya Adı']}.pdf", 
+                                mime="application/pdf",
+                                key=f"dl_{index}",
+                                use_container_width=True
+                            )
+                    else:
+                        st.caption("⚠️ Dosya sunucuda yok")
+                else:
+                    st.caption("⏳ Brief Bekleniyor")
