@@ -6,7 +6,7 @@ import math
 # Sayfa Ayarları
 st.set_page_config(page_title="Kampanya & Brief Yönetimi", layout="wide")
 
-# CSS: Poppins Font ve Modern Tasarım
+# CSS: Poppins Font ve Kompakt (Küçültülmüş) Kart Tasarımı
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
@@ -20,9 +20,9 @@ st.markdown("""
         font-family: 'Poppins', sans-serif !important;
     }
 
-    /* Sayfalama butonu için özel stil */
-    .st-emotion-cache-12fmjuu {
-        justify-content: center;
+    /* Kartların iç boşluklarını daraltarak 12 kampanyanın ekrana daha iyi sığmasını sağladık */
+    [data-testid="stVerticalBlockBorderWrapper"] {
+        padding: 0.8rem !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -30,8 +30,10 @@ st.markdown("""
 # Dosya Yolları
 DOSYA_KLASORU = "yuklenen_briefler"
 CSV_DOSYASI = "kampanya_verileri.csv"
-MAKS_KAMPANYA = 25
-ACILIYET_LISTESI = ["Normal", "Önemli", "Kritik", "Çok Acil!"]
+MAKS_KAMPANYA = 50 # 12'şer listelediğimiz için limiti biraz artırdım
+
+# Doğru Aciliyet Sıralaması (Hiyerarşik)
+ACILIYET_LISTESI = ["Çok Acil!", "Kritik", "Önemli", "Normal"]
 
 os.makedirs(DOSYA_KLASORU, exist_ok=True)
 
@@ -62,7 +64,7 @@ if is_admin:
         with st.form("yeni_ekle_form", clear_on_submit=True):
             col_ad, col_acil = st.columns(2)
             k_adi = col_ad.text_input("Kampanya Adı")
-            aciliyet = col_acil.selectbox("Aciliyet", ACILIYET_LISTESI)
+            aciliyet = col_acil.selectbox("Aciliyet Durumu", ACILIYET_LISTESI)
             
             c_bas, c_bit = st.columns(2)
             baslangic = c_bas.date_input("Başlangıç")
@@ -91,7 +93,7 @@ if is_admin:
     st.divider()
     st.header("📝 Yönetim ve Silme")
     for index, row in df.iterrows():
-        with st.expander(f"⚙️ {row['Kampanya Adı']}"):
+        with st.expander(f"⚙️ {row['Kampanya Adı']} ({row['Aciliyet']})"):
             col_ed, col_del = st.columns([4, 1])
             with col_ed:
                 y_bas = st.date_input("Başlangıç", pd.to_datetime(row["Başlangıç"]), key=f"eb_{index}")
@@ -123,12 +125,18 @@ st.header("📋 Aktif Kampanyalar")
 if df.empty:
     st.info("Gösterilecek kampanya bulunmuyor.")
 else:
-    # Sayfalama Hesaplamaları
-    is_basina_kampanya = 5
-    toplam_kampanya = len(df)
+    # --- SIRALAMA MANTIĞI: Aciliyete göre, ardından yeniliğe göre ---
+    siralama_kategorisi = pd.CategoricalDtype(categories=ACILIYET_LISTESI, ordered=True)
+    df_sirali = df.copy()
+    df_sirali["Aciliyet"] = df_sirali["Aciliyet"].astype(siralama_kategorisi)
+    # Önce aciliyet (artan), sonra ID (azalan - en yeni ilk)
+    df_sirali = df_sirali.sort_values(["Aciliyet", "ID"], ascending=[True, False]).reset_index(drop=True)
+
+    # Sayfalama Hesaplamaları (12 Kampanya)
+    is_basina_kampanya = 12
+    toplam_kampanya = len(df_sirali)
     toplam_sayfa = math.ceil(toplam_kampanya / is_basina_kampanya)
     
-    # Mevcut sayfa kontrolü (silme işlemlerinden sonra taşmayı önlemek için)
     if st.session_state.mevcut_sayfa > toplam_sayfa:
         st.session_state.mevcut_sayfa = toplam_sayfa
     if st.session_state.mevcut_sayfa < 1:
@@ -136,31 +144,31 @@ else:
 
     bas_index = (st.session_state.mevcut_sayfa - 1) * is_basina_kampanya
     bit_index = min(bas_index + is_basina_kampanya, toplam_kampanya)
-    gosterilecek_df = df.iloc[bas_index:bit_index]
+    gosterilecek_df = df_sirali.iloc[bas_index:bit_index]
 
-    # Kampanya Listesi
+    # Kampanya Listesi (Kompakt)
     for index, row in gosterilecek_df.iterrows():
         with st.container(border=True):
             c1, c2, c3, c4 = st.columns([3, 2, 2, 2])
             with c1:
-                st.subheader(f"🎯 {row['Kampanya Adı']}")
+                # Yazı boyutu st.subheader yerine markdown(####) ile küçültüldü
+                st.markdown(f"#### 🎯 {row['Kampanya Adı']}")
                 if row["Aciliyet"] == "Çok Acil!": r = "🔴"
                 elif row["Aciliyet"] == "Kritik": r = "🟠"
                 elif row["Aciliyet"] == "Önemli": r = "🟡"
                 else: r = "🟢"
-                st.write(f"**Aciliyet:** {r} {row['Aciliyet']}")
+                st.markdown(f"**Aciliyet:** {r} {row['Aciliyet']}")
             with c2:
                 st.write(f"**Başlangıç:**\n{row['Başlangıç']}")
             with c3:
                 st.write(f"**Bitiş:**\n{row['Bitiş']}")
             with c4:
-                st.write("**Brief Dosyası:**")
                 d_ad = str(row["Dosya"]).strip()
                 if pd.notna(row["Dosya"]) and d_ad not in ["", "nan"]:
                     yol = os.path.join(DOSYA_KLASORU, os.path.basename(d_ad.replace("\\", "/")))
                     if os.path.exists(yol):
                         with open(yol, "rb") as f:
-                            st.download_button("📥 Brief İndir", f, file_name=f"{row['Kampanya Adı']}.pdf", key=f"dl_{index}", use_container_width=True)
+                            st.download_button("📥 Brief İndir", f, file_name=f"{row['Kampanya Adı']}.pdf", key=f"dl_ajans_{index}", use_container_width=True)
                     else: st.caption("⚠️ Dosya eksik")
                 else: st.caption("⏳ Bekleniyor")
 
@@ -175,8 +183,8 @@ else:
                 st.rerun()
     
     with p2:
-        st.markdown(f"<p style='text-align: center; font-weight: bold; font-size: 18px;'>Sayfa {st.session_state.mevcut_sayfa} / {toplam_sayfa}</p>", unsafe_allow_html=True)
-        st.markdown(f"<p style='text-align: center; font-size: 12px; color: gray;'>Toplam {toplam_kampanya} kampanya</p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='text-align: center; font-weight: bold; font-size: 16px; margin-bottom: 0;'>Sayfa {st.session_state.mevcut_sayfa} / {toplam_sayfa}</p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='text-align: center; font-size: 12px; color: gray;'>Gösterilen iş: {len(gosterilecek_df)} | Toplam iş: {toplam_kampanya}</p>", unsafe_allow_html=True)
 
     with p3:
         if st.session_state.mevcut_sayfa < toplam_sayfa:
